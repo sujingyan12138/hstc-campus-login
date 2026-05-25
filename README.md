@@ -1,6 +1,6 @@
-# HSTC Quick Login
+# HSTC 校园网一键重登
 
-韩山师范学院校园网 Android 登录工具，目标是把常见的校园网联网操作收敛到一个原生 App 里，减少反复打开认证页、设备满额后手动解绑、登录失败后重复尝试的成本。
+韩山师范学院校园网 Android 登录工具，目标是把常见的校园网联网操作收敛到一个原生 App 里，减少反复打开认证页、跨区域重新登录、设备满额后手动解绑、登录失败后重复尝试的成本。
 
 ## 项目简介
 
@@ -8,6 +8,8 @@
 
 - 检测当前设备是否在线
 - 采集当前网络环境参数（IP、MAC、AC IP 等）
+- 模拟系统 WLAN 认证页探测，自动发现不同区域的认证入口
+- 从门户 URL、HTML/JavaScript 跳转、CAS 回调 `state` 中提取认证参数
 - 普通账号密码直登
 - 统一身份认证登录
 - 加载账号绑定设备列表
@@ -22,14 +24,28 @@
 ### 如何使用
 
 1. 进入 `设置` 页面保存账号和密码
-2. 确保当前设备处于未登录校园网状态，且连接着HSTC网络，并未开热点。
-3. 回到 `首页` 点击 `抓取认证页参数（仅未登录时）`
-4. 随后点击`统一身份认证登录` 
-5. 认证完成后应用会自动刷新在线状态
+2. 确保手机已连接 `HS_WIFI`，并且没有开启热点或代理类工具
+3. 如果当前已在线，先在系统认证页或应用内注销后再测试参数抓取
+4. 回到 `首页` 点击 `抓取认证页参数（仅未登录时）`
+5. 应用会在内置 WebView 中模拟系统联网探测，必要时自动进入 `统一身份认证` 并提交已保存的账号密码
+6. 抓到参数后，点击 `统一身份认证登录` 或按当前状态继续快速登录
+7. 认证完成后应用会自动刷新在线状态
 
 ![image-20260414091848565](./assets/image-20260414091848565.png)
 
 ![image-20260414092012796](./assets/image-20260414092012796.png)
+
+### 跨区域测试建议
+
+在宿舍、教学区、食堂等不同区域测试时，推荐按下面顺序排查：
+
+1. 连接 `HS_WIFI`
+2. 确认系统会提示 `登录到 WLAN 网络 HS_WIFI`
+3. 不要先点系统通知，先打开本应用点击 `抓取认证页参数（仅未登录时）`
+4. 如果提示未抓到参数，打开 PCAPdroid 后再点一次本应用的抓取按钮
+5. 将 `/storage/emulated/0/Download/PCAPdroid/` 下新生成的 pcap 文件用于分析
+
+PCAPdroid 对本应用内置 WebView 的流量通常足够；如果需要查看系统 WLAN 登录页或 HTTPS 表单明文，再考虑使用 Reqable、HTTP Toolkit 等带证书解密的抓包工具。
 
 ## 技术栈
 
@@ -59,7 +75,14 @@
 - `page_index`
 - `jsVersion`
 
-当自动采集不完整时，也支持在未登录状态下打开认证页，通过内置 WebView 抓取认证页跳转参数。
+当自动采集不完整时，也支持在未登录状态下打开认证页，通过内置 WebView 抓取认证页参数。新版抓取逻辑不依赖固定网关 IP，会按以下路径依次尝试：
+
+- 访问多个 HTTP 联网探测地址，等待校园网劫持
+- 解析 `rz.hstc.edu.cn` 或 `192.168.x.x` 这类门户 URL 中的 `wlanuserip`、`usermac`、`wlanacip` 等参数
+- 读取当前页面 HTML/JavaScript，解析脚本跳转里的认证参数
+- 自动点击门户页的 `统一身份认证`
+- 自动填写已保存账号密码并提交 CAS 登录表单
+- 从 CAS 回调 URL 或 `state` 中恢复认证参数
 
 ### 3. 两种登录方式
 
@@ -117,7 +140,7 @@ HSTC/
 ### 1. 克隆项目
 
 ```powershell
-git clone <your-repo-url>
+git clone https://github.com/sujingyan12138/hstc-campus-login.git
 cd HSTC
 ```
 
@@ -130,6 +153,8 @@ cd HSTC
 Windows 下可执行：
 
 ```powershell
+$env:SystemRoot='C:\WINDOWS'
+$env:WINDIR='C:\WINDOWS'
 .\gradlew.bat assembleDebug
 ```
 
@@ -145,12 +170,30 @@ Windows 下可执行：
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
+当前包名：
 
+```text
+com.hstc.quicklogin
+```
+
+当前调试版本：
+
+```text
+versionName 1.0.1
+versionCode 2
+```
+
+### 4. 安装到已连接手机
+
+```powershell
+adb install -r -d .\app\build\outputs\apk\debug\app-debug.apk
+```
 
 ## 注意事项
 
 - 该项目目前针对韩山师范学院校园网门户实现，接口和参数具有明显校内环境耦合，不保证适用于其他学校
 - 某些登录流程依赖当前设备处于校园网认证环境中，离开该环境时无法正常获取参数
+- 不要把账号密码、可解密 HTTPS 抓包、包含个人认证票据的 pcap 文件提交到 Git
 - `AndroidManifest.xml` 中启用了明文流量与自定义网络配置，属于为校园网认证流程兼容而做的工程处理，后续可以再做更细化的收敛
 - 仓库中如存在抓包文件、窗口 dump、构建产物等内容，不建议提交到 Git
 
@@ -163,5 +206,15 @@ app/build/outputs/apk/debug/app-debug.apk
 可通过以下命令运行测试：
 
 ```powershell
+$env:SystemRoot='C:\WINDOWS'
+$env:WINDIR='C:\WINDOWS'
 .\gradlew.bat testDebugUnitTest
+```
+
+也可以同时运行测试并生成调试 APK：
+
+```powershell
+$env:SystemRoot='C:\WINDOWS'
+$env:WINDIR='C:\WINDOWS'
+cmd /c gradlew.bat testDebugUnitTest assembleDebug
 ```
