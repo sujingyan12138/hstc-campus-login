@@ -13,9 +13,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.List
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,6 +54,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
 import com.hstc.quicklogin.data.BoundDevice
+import java.net.URLDecoder
 
 private enum class AppTab(val title: String) {
     Home("首页"),
@@ -72,6 +73,9 @@ fun HstcQuickLoginAppScreen(viewModel: AuthViewModel) {
     if (uiState.showPortalProbe) {
         PortalProbeDialog(
             onCaptured = viewModel::capturePortalUrl,
+            onCapturedContent = viewModel::capturePortalContent,
+            username = uiState.credentials.username,
+            password = uiState.credentials.password,
             onDismiss = viewModel::cancelPortalProbe
         )
     }
@@ -110,7 +114,7 @@ fun HstcQuickLoginAppScreen(viewModel: AuthViewModel) {
                         currentTab = AppTab.Devices
                         viewModel.loadDevices()
                     },
-                    icon = { Icon(Icons.Outlined.List, contentDescription = null) },
+                    icon = { Icon(Icons.AutoMirrored.Outlined.List, contentDescription = null) },
                     label = { Text(AppTab.Devices.title) }
                 )
                 NavigationBarItem(
@@ -456,6 +460,9 @@ private fun SwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean
 @Composable
 private fun PortalProbeDialog(
     onCaptured: (String) -> Unit,
+    onCapturedContent: (String, String) -> Unit,
+    username: String,
+    password: String,
     onDismiss: () -> Unit
 ) {
     androidx.compose.material3.AlertDialog(
@@ -469,43 +476,210 @@ private fun PortalProbeDialog(
         title = { Text("抓取认证页参数") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("会临时打开内置页面访问联网探测地址，抓到校园网认证页跳转后自动关闭。")
+                Text("会临时打开内置页面访问联网探测地址，必要时自动进入统一身份认证并从回调里抓取参数。")
                 AndroidView(
                     factory = { context ->
+                        val probeUrls = listOf(
+                            "http://www.gstatic.com/generate_204",
+                            "http://connectivitycheck.gstatic.com/generate_204",
+                            "http://www.msftconnecttest.com/redirect",
+                            "http://connect.rom.miui.com/generate_204",
+                            "http://captive.apple.com/hotspot-detect.html",
+                            "http://neverssl.com/",
+                            "http://1.1.1.1/"
+                        )
+                        var captured = false
+                        var nextProbeIndex = 0
+
+                        fun looksLikePortalParamPage(url: String): Boolean {
+                            val normalized = url.lowercase()
+                            val hasPortalParams = (
+                                normalized.contains("wlanuserip=") ||
+                                    normalized.contains("wlan_user_ip=") ||
+                                    normalized.contains("userip=") ||
+                                    normalized.contains("v4ip=")
+                                ) &&
+                                (
+                                    normalized.contains("usermac=") ||
+                                        normalized.contains("wlan_user_mac=") ||
+                                        normalized.contains("wlanacip=") ||
+                                        normalized.contains("wlan_ac_ip=")
+                                    )
+                            val hasCasState = normalized.contains("hscas.hstc.edu.cn") &&
+                                normalized.contains("service=") &&
+                                normalized.contains("state=")
+                            val hasDirectCasState = normalized.contains("/eportal/portal/cas/") &&
+                                normalized.contains("state=")
+                            return hasPortalParams || hasCasState || hasDirectCasState
+                        }
+
+                        fun looksLikePortalContent(text: String): Boolean {
+                            val normalized = text.lowercase()
+                            val hasPortalParams = (
+                                normalized.contains("wlanuserip") ||
+                                    normalized.contains("wlan_user_ip") ||
+                                    normalized.contains("usermac") ||
+                                    normalized.contains("wlan_user_mac") ||
+                                    normalized.contains("wlanacip") ||
+                                    normalized.contains("wlan_ac_ip")
+                                )
+                            val hasCasState = normalized.contains("state=") &&
+                                (
+                                    normalized.contains("/eportal/portal/cas") ||
+                                        normalized.contains("hscas.hstc.edu.cn") ||
+                                        normalized.contains("rz.hstc.edu.cn")
+                                    )
+                            return hasPortalParams || hasCasState
+                        }
+
+                        fun captureOnce(url: String): Boolean {
+                            if (captured || !looksLikePortalParamPage(url)) return false
+                            captured = true
+                            onCaptured(url)
+                            return true
+                        }
+
+                        fun capturePageContent(view: WebView?, baseUrl: String) {
+                            if (captured || view == null) return
+                            view.evaluateJavascript(
+                                "encodeURIComponent(document.documentElement ? document.documentElement.outerHTML : '')"
+                            ) { result ->
+                                if (captured) return@evaluateJavascript
+                                val encoded = result
+                                    ?.trim()
+                                    ?.removeSurrounding("\"")
+                                    .orEmpty()
+                                val html = runCatching {
+                                    URLDecoder.decode(encoded, "UTF-8")
+                                }.getOrDefault("")
+                                if (html.isNotBlank() && looksLikePortalContent(html)) {
+                                    captured = true
+                                    onCapturedContent(html, baseUrl)
+                                }
+                            }
+                        }
+
+                        fun WebView.loadNextProbe() {
+                            if (captured || nextProbeIndex >= probeUrls.size) return
+                            val baseUrl = probeUrls[nextProbeIndex++]
+                            val separator = if (baseUrl.contains("?")) "&" else "?"
+                            loadUrl("$baseUrl${separator}hstc_probe_ts=${System.currentTimeMillis()}")
+                        }
+
                         WebView(context).apply {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             webViewClient = object : WebViewClient() {
+                                private fun tryPortalButtonClick(view: WebView?) {
+                                    val script = """
+                                        (function() {
+                                            if (window.custom && typeof window.custom.identity_login === 'function') {
+                                                setTimeout(function() { window.custom.identity_login(); }, 100);
+                                                return 'identity_login';
+                                            }
+                                            var btn = document.querySelector('#cas_login_1,[onclick*="identity_login"],[onclick*="cas"]');
+                                            if (!btn) {
+                                                var candidates = Array.prototype.slice.call(document.querySelectorAll('button,input,span,a,div'));
+                                                btn = candidates.find(function(el) {
+                                                    return /统一身份认证/.test((el.innerText || el.value || '').trim());
+                                                }) || null;
+                                            }
+                                            if (btn) {
+                                                setTimeout(function() { btn.click(); }, 150);
+                                                return 'clicked';
+                                            }
+                                            return 'missing';
+                                        })();
+                                    """.trimIndent()
+                                    view?.evaluateJavascript(script, null)
+                                }
+
+                                private fun tryCasFormSubmit(view: WebView?) {
+                                    if (username.isBlank() || password.isBlank()) return
+                                    val safeUsername = username
+                                        .replace("\\", "\\\\")
+                                        .replace("'", "\\'")
+                                    val safePassword = password
+                                        .replace("\\", "\\\\")
+                                        .replace("'", "\\'")
+                                    val script = """
+                                        (function() {
+                                            var user = document.querySelector('#username,input[name="username"],input[name="user"],input[type="text"]');
+                                            var pass = document.querySelector('#password,input[name="password"],input[type="password"]');
+                                            if (!user || !pass) return 'missing';
+                                            user.focus();
+                                            user.value = '$safeUsername';
+                                            user.dispatchEvent(new Event('input', { bubbles: true }));
+                                            user.dispatchEvent(new Event('change', { bubbles: true }));
+                                            pass.focus();
+                                            pass.value = '$safePassword';
+                                            pass.dispatchEvent(new Event('input', { bubbles: true }));
+                                            pass.dispatchEvent(new Event('change', { bubbles: true }));
+                                            var btn = document.querySelector('#login,button[type="submit"],input[type="submit"],.login-btn');
+                                            if (!btn) {
+                                                var candidates = Array.prototype.slice.call(document.querySelectorAll('button,input,a,div'));
+                                                btn = candidates.find(function(el) {
+                                                    return /^登录${'$'}/.test((el.innerText || el.value || '').trim());
+                                                }) || null;
+                                            }
+                                            if (btn) {
+                                                setTimeout(function() { btn.click(); }, 180);
+                                                return 'submitted';
+                                            }
+                                            var form = pass.form || user.form || document.querySelector('form');
+                                            if (form) {
+                                                setTimeout(function() { form.submit(); }, 180);
+                                                return 'form_submit';
+                                            }
+                                            return 'filled';
+                                        })();
+                                    """.trimIndent()
+                                    view?.evaluateJavascript(script, null)
+                                }
+
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): Boolean {
                                     val url = request?.url?.toString().orEmpty()
-                                    if (url.contains("rz.hstc.edu.cn") &&
-                                        url.contains("wlanuserip=") &&
-                                        url.contains("usermac=")
-                                    ) {
-                                        onCaptured(url)
-                                        return true
-                                    }
-                                    return false
+                                    return captureOnce(url)
+                                }
+
+                                override fun onLoadResource(view: WebView?, url: String?) {
+                                    captureOnce(url.orEmpty())
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     val current = url.orEmpty()
-                                    if (current.contains("rz.hstc.edu.cn") &&
-                                        current.contains("wlanuserip=") &&
-                                        current.contains("usermac=")
-                                    ) {
-                                        onCaptured(current)
+                                    if (captureOnce(current)) {
+                                        return
                                     }
+                                    capturePageContent(view, current)
+                                    tryPortalButtonClick(view)
+                                    tryCasFormSubmit(view)
+                                    view?.postDelayed({
+                                        if (!captured) {
+                                            tryPortalButtonClick(view)
+                                            tryCasFormSubmit(view)
+                                        }
+                                    }, 1200)
+                                    view?.postDelayed({
+                                        if (!captured) {
+                                            tryCasFormSubmit(view)
+                                        }
+                                    }, 2400)
+                                    view?.postDelayed({
+                                        if (!captured) {
+                                            view.loadNextProbe()
+                                        }
+                                    }, 5000)
                                 }
                             }
                             settings.cacheMode = WebSettings.LOAD_NO_CACHE
                             clearCache(true)
                             clearHistory()
                             clearFormData()
-                            loadUrl("http://www.msftconnecttest.com/redirect?ts=${System.currentTimeMillis()}")
+                            loadNextProbe()
                         }
                     },
                     modifier = Modifier
@@ -670,7 +844,9 @@ private fun CasLoginDialog(
 
                                 private fun isSuccessUrl(url: String): Boolean {
                                     return url.contains("/3.htm") ||
-                                        url.contains("login_success", ignoreCase = true)
+                                        url.contains("login_success", ignoreCase = true) ||
+                                        (url.contains("hsportal.hstc.edu.cn", ignoreCase = true) &&
+                                            url.contains("/main.html", ignoreCase = true))
                                 }
 
                                 private fun maybeFinish(url: String): Boolean {

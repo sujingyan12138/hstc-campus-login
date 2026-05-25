@@ -65,10 +65,19 @@ class AuthRepository(
                 debugLines = debugLogStore.lines.value
             )
         debugLogStore.add("已抓取认证页参数 ip=${parsed.ip.ifBlank { "?" }} mac=${parsed.mac.ifBlank { "?" }}")
-        val merged = parsed.copy(
-            programIndex = existing?.programIndex.orEmpty(),
-            pageIndex = existing?.pageIndex.orEmpty(),
-            loginMethod = existing?.loginMethod ?: 0
+        val merged = PortalContext(
+            ip = parsed.ip.ifBlank { existing?.ip.orEmpty() },
+            ipv6 = parsed.ipv6.ifBlank { existing?.ipv6.orEmpty() },
+            mac = parsed.mac.ifBlank { existing?.mac.orEmpty() },
+            vlan = parsed.vlan.ifBlank { existing?.vlan.orEmpty() },
+            wlanAcIp = parsed.wlanAcIp.ifBlank { existing?.wlanAcIp.orEmpty() },
+            wlanAcName = parsed.wlanAcName.ifBlank { existing?.wlanAcName.orEmpty() },
+            redirectUrl = parsed.redirectUrl.ifBlank { existing?.redirectUrl.orEmpty() },
+            programIndex = parsed.programIndex.ifBlank { existing?.programIndex.orEmpty() },
+            pageIndex = parsed.pageIndex.ifBlank { existing?.pageIndex.orEmpty() },
+            loginMethod = parsed.loginMethod.takeIf { it != 0 } ?: (existing?.loginMethod ?: 0),
+            unbindMacEnabled = parsed.unbindMacEnabled || (existing?.unbindMacEnabled ?: false),
+            jsVersion = parsed.jsVersion.ifBlank { existing?.jsVersion.orEmpty() }.ifBlank { DEFAULT_JS_VERSION }
         )
         val context = portalConfigService.enrich(merged)
         val (online, account) = campusAuthService.checkStatus(context)
@@ -77,6 +86,43 @@ class AuthRepository(
             isOnline = online,
             onlineAccount = account,
             statusMessage = "已从认证页抓取参数",
+            credentials = credentials,
+            debugLines = debugLogStore.lines.value
+        )
+    }
+
+    suspend fun capturePortalContent(text: String, baseUrl: String, existing: PortalContext?): AuthSnapshot {
+        val credentials = credentialStore.load()
+        val parsed = networkEnvCollector.parsePortalContent(text, baseUrl)
+            ?: return AuthSnapshot(
+                context = existing,
+                credentials = credentials,
+                statusMessage = "当前页面内容里没有找到校园网认证参数",
+                lastLoginResult = LoginResult(false, "认证页内容无效"),
+                debugLines = debugLogStore.lines.value
+            )
+        debugLogStore.add("已从认证页内容抓取参数 ip=${parsed.ip.ifBlank { "?" }} mac=${parsed.mac.ifBlank { "?" }}")
+        val merged = PortalContext(
+            ip = parsed.ip.ifBlank { existing?.ip.orEmpty() },
+            ipv6 = parsed.ipv6.ifBlank { existing?.ipv6.orEmpty() },
+            mac = parsed.mac.ifBlank { existing?.mac.orEmpty() },
+            vlan = parsed.vlan.ifBlank { existing?.vlan.orEmpty() },
+            wlanAcIp = parsed.wlanAcIp.ifBlank { existing?.wlanAcIp.orEmpty() },
+            wlanAcName = parsed.wlanAcName.ifBlank { existing?.wlanAcName.orEmpty() },
+            redirectUrl = parsed.redirectUrl.ifBlank { existing?.redirectUrl.orEmpty() }.ifBlank { baseUrl },
+            programIndex = parsed.programIndex.ifBlank { existing?.programIndex.orEmpty() },
+            pageIndex = parsed.pageIndex.ifBlank { existing?.pageIndex.orEmpty() },
+            loginMethod = parsed.loginMethod.takeIf { it != 0 } ?: (existing?.loginMethod ?: 0),
+            unbindMacEnabled = parsed.unbindMacEnabled || (existing?.unbindMacEnabled ?: false),
+            jsVersion = parsed.jsVersion.ifBlank { existing?.jsVersion.orEmpty() }.ifBlank { DEFAULT_JS_VERSION }
+        )
+        val context = portalConfigService.enrich(merged)
+        val (online, account) = campusAuthService.checkStatus(context)
+        return AuthSnapshot(
+            context = context,
+            isOnline = online,
+            onlineAccount = account,
+            statusMessage = "已从认证页内容抓取参数",
             credentials = credentials,
             debugLines = debugLogStore.lines.value
         )

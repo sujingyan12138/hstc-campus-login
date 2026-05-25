@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.wifi.WifiManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.NetworkInterface
@@ -15,45 +14,44 @@ class NetworkEnvCollector(
     private val debugLogStore: DebugLogStore
 ) {
     private val probeUrls = listOf(
+        "http://www.gstatic.com/generate_204",
         "http://connectivitycheck.gstatic.com/generate_204",
         "http://www.msftconnecttest.com/redirect",
-        "http://connect.rom.miui.com/generate_204"
+        "http://connect.rom.miui.com/generate_204",
+        "http://captive.apple.com/hotspot-detect.html",
+        "http://neverssl.com/",
+        "http://1.1.1.1/"
     )
 
     suspend fun collect(): PortalContext = withContext(Dispatchers.IO) {
-        val redirectContext = collectFromRedirectProbe()
         val statusContext = collectFromChkStatus()
         val localContext = collectFromLocalInterface()
         val wifiContext = collectFromWifiManager()
+        val baseContext = mergeContexts(statusContext, localContext, wifiContext)
+        val redirectContext = if (baseContext.ip.isBlank() || baseContext.wlanAcIp.isBlank()) {
+            collectFromRedirectProbe()
+        } else {
+            PortalContext()
+        }
         PortalContext(
-            ip = redirectContext.ip.ifBlank { statusContext.ip }.ifBlank { localContext.ip }.ifBlank { wifiContext.ip },
-            ipv6 = redirectContext.ipv6.ifBlank { statusContext.ipv6 }.ifBlank { localContext.ipv6 }.ifBlank { wifiContext.ipv6 },
-            mac = redirectContext.mac.ifBlank { statusContext.mac }.ifBlank { localContext.mac }.ifBlank { wifiContext.mac },
-            vlan = redirectContext.vlan.ifBlank { statusContext.vlan },
-            wlanAcIp = redirectContext.wlanAcIp.ifBlank { statusContext.wlanAcIp },
-            wlanAcName = redirectContext.wlanAcName.ifBlank { statusContext.wlanAcName },
-            redirectUrl = redirectContext.redirectUrl.ifBlank { statusContext.redirectUrl }
+            ip = baseContext.ip.ifBlank { redirectContext.ip },
+            ipv6 = baseContext.ipv6.ifBlank { redirectContext.ipv6 },
+            mac = baseContext.mac.ifBlank { redirectContext.mac },
+            vlan = baseContext.vlan.ifBlank { redirectContext.vlan },
+            wlanAcIp = baseContext.wlanAcIp.ifBlank { redirectContext.wlanAcIp },
+            wlanAcName = baseContext.wlanAcName.ifBlank { redirectContext.wlanAcName },
+            redirectUrl = baseContext.redirectUrl.ifBlank { redirectContext.redirectUrl }
         ).also {
             debugLogStore.add("环境采集完成 ip=${it.ip.ifBlank { "?" }} mac=${it.mac.ifBlank { "?" }}")
         }
     }
 
     fun parsePortalRedirect(urlString: String): PortalContext? {
-        val url = urlString.toHttpUrlOrNull() ?: return null
-        if (!url.host.contains("rz.hstc.edu.cn")) return null
-        val context = PortalContext(
-            ip = url.queryParameter("wlanuserip").orEmpty(),
-            mac = sanitizeMac(url.queryParameter("usermac").orEmpty()),
-            vlan = url.queryParameter("uservid").orEmpty(),
-            wlanAcIp = url.queryParameter("wlanacip").orEmpty(),
-            wlanAcName = url.queryParameter("wlanacname").orEmpty(),
-            redirectUrl = urlString
-        )
-        return if (context.ip.isNotBlank() && context.mac.isNotBlank() && context.wlanAcIp.isNotBlank()) {
-            context
-        } else {
-            null
-        }
+        return parsePortalRedirectUrl(urlString) { debugLogStore.add(it) }
+    }
+
+    fun parsePortalContent(text: String, baseUrl: String): PortalContext? {
+        return extractPortalContextFromText(text, baseUrl) { debugLogStore.add(it) }
     }
 
     private fun collectFromRedirectProbe(): PortalContext {
@@ -61,18 +59,19 @@ class NetworkEnvCollector(
             try {
                 val request = Request.Builder().url(probeUrl).get().build()
                 client.newCall(request).execute().use { response ->
-                    val location = response.header("Location").orEmpty()
-                    if (location.contains("rz.hstc.edu.cn")) {
-                        debugLogStore.add("探测到重定向入口: ${redactSensitive(location)}")
-                        val url = location.toHttpUrlOrNull() ?: return@use
-                        return PortalContext(
-                            ip = url.queryParameter("wlanuserip").orEmpty(),
-                            mac = sanitizeMac(url.queryParameter("usermac").orEmpty()),
-                            vlan = url.queryParameter("uservid").orEmpty(),
-                            wlanAcIp = url.queryParameter("wlanacip").orEmpty(),
-                            wlanAcName = url.queryParameter("wlanacname").orEmpty(),
-                            redirectUrl = location
-                        )
+                    val requestUrl = response.request.url.toString()
+                    parsePortalRedirect(requestUrl)?.let { return it }
+
+                    val location = response.header("Location")
+                    if (!location.isNullOrBlank()) {
+                        val resolved = response.request.url.resolve(location)?.toString() ?: location
+                        debugLogStore.add("探测到重定向入口: ${redactSensitive(resolved)}")
+                        parsePortalRedirect(resolved)?.let { return it }
+                    }
+
+                    val body = response.body?.string().orEmpty()
+                    extractPortalContextFromText(body, requestUrl) { debugLogStore.add(it) }?.let {
+                        return it.copy(redirectUrl = it.redirectUrl.ifBlank { requestUrl })
                     }
                 }
             } catch (error: Exception) {
@@ -124,11 +123,11 @@ class NetworkEnvCollector(
                 PortalContext()
             } else {
                 val ipv4 = iface.inetAddresses.toList()
-                    .firstOrNull { !it.isLoopbackAddress && !it.hostAddress.contains(":") }
+                    .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(":") == false }
                     ?.hostAddress
                     .orEmpty()
                 val ipv6 = iface.inetAddresses.toList()
-                    .firstOrNull { !it.isLoopbackAddress && it.hostAddress.contains(":") }
+                    .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(":") == true }
                     ?.hostAddress
                     ?.substringBefore('%')
                     .orEmpty()
@@ -171,4 +170,21 @@ class NetworkEnvCollector(
             PortalContext()
         }
     }
+
+    private fun mergeContexts(
+        statusContext: PortalContext,
+        localContext: PortalContext,
+        wifiContext: PortalContext
+    ): PortalContext {
+        return PortalContext(
+            ip = statusContext.ip.ifBlank { localContext.ip }.ifBlank { wifiContext.ip },
+            ipv6 = statusContext.ipv6.ifBlank { localContext.ipv6 }.ifBlank { wifiContext.ipv6 },
+            mac = statusContext.mac.ifBlank { localContext.mac }.ifBlank { wifiContext.mac },
+            vlan = statusContext.vlan.ifBlank { "0" },
+            wlanAcIp = statusContext.wlanAcIp,
+            wlanAcName = statusContext.wlanAcName,
+            redirectUrl = statusContext.redirectUrl
+        )
+    }
+
 }

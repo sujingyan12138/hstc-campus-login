@@ -120,6 +120,14 @@ class AuthViewModel(
         repository.capturePortalUrl(url, _uiState.value.context)
     }
 
+    fun capturePortalContent(text: String, baseUrl: String) = launchTask(
+        before = {
+            _uiState.update { it.copy(showPortalProbe = false) }
+        }
+    ) {
+        repository.capturePortalContent(text, baseUrl, _uiState.value.context)
+    }
+
     fun saveCredentials(username: String, password: String, autoRetry: Boolean, loggingEnabled: Boolean) {
         viewModelScope.launch {
             val credentials = repository.saveCredentials(
