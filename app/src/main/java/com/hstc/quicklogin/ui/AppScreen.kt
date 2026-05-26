@@ -763,9 +763,11 @@ private fun CasLoginDialog(
                                     evalWithLog(view, "统一认证按钮重试2", 2500, script)
                                 }
 
-                                private fun tryAutoFill(view: WebView?, url: String) {
-                                    if (username.isBlank() || password.isBlank()) return
-                                    if (!url.contains("hscas.hstc.edu.cn", ignoreCase = true)) return
+                                private fun tryAutoFill(view: WebView?) {
+                                    if (username.isBlank() || password.isBlank()) {
+                                        onDebug("统一认证自动填表跳过: 未保存账号或密码")
+                                        return
+                                    }
                                     val script = """
                                         (function() {
                                             function setNativeValue(el, value) {
@@ -776,70 +778,154 @@ private fun CasLoginDialog(
                                                     el.value = value;
                                                 }
                                             }
-                                            function findInput(candidates) {
+                                            function fire(el) {
+                                                ['input', 'change', 'keyup', 'blur'].forEach(function(name) {
+                                                    try { el.dispatchEvent(new Event(name, { bubbles: true })); } catch (e) {}
+                                                });
+                                            }
+                                            function visible(el) {
+                                                if (!el) return false;
+                                                var rect = el.getBoundingClientRect();
+                                                var style = window.getComputedStyle(el);
+                                                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                                            }
+                                            function docs() {
+                                                var result = [document];
+                                                var frames = document.querySelectorAll('iframe,frame');
+                                                for (var i = 0; i < frames.length; i++) {
+                                                    try {
+                                                        if (frames[i].contentDocument) result.push(frames[i].contentDocument);
+                                                    } catch (e) {}
+                                                }
+                                                return result;
+                                            }
+                                            function bySelector(doc, candidates) {
                                                 for (var i = 0; i < candidates.length; i++) {
-                                                    var el = document.querySelector(candidates[i]);
-                                                    if (el) return el;
+                                                    try {
+                                                        var list = doc.querySelectorAll(candidates[i]);
+                                                        for (var j = 0; j < list.length; j++) {
+                                                            if (visible(list[j]) && !list[j].disabled && !list[j].readOnly) return list[j];
+                                                        }
+                                                    } catch (e) {}
                                                 }
                                                 return null;
                                             }
-                                            var user = findInput([
-                                                'input[name=username]',
-                                                'input[name=userName]',
-                                                'input[name=mobileUsername]',
-                                                'input[id=username]',
-                                                'input[placeholder*="学号"]',
-                                                'input[placeholder*="工号"]',
-                                                'input[type=text]',
-                                                'input[type=tel]'
-                                            ]);
-                                            var pass = findInput([
-                                                'input[name=password]',
-                                                'input[id=password]',
-                                                'input[placeholder*="密码"]',
-                                                'input[type=password]'
-                                            ]);
-                                            if (!user || !pass) return 'missing';
+                                            function byAttrs(doc, wantPassword) {
+                                                var inputs = Array.prototype.slice.call(doc.querySelectorAll('input'));
+                                                for (var i = 0; i < inputs.length; i++) {
+                                                    var el = inputs[i];
+                                                    if (!visible(el) || el.disabled || el.readOnly) continue;
+                                                    var type = (el.getAttribute('type') || 'text').toLowerCase();
+                                                    var name = ((el.getAttribute('name') || '') + ' ' +
+                                                        (el.getAttribute('id') || '') + ' ' +
+                                                        (el.getAttribute('placeholder') || '') + ' ' +
+                                                        (el.getAttribute('aria-label') || '')).toLowerCase();
+                                                    if (wantPassword) {
+                                                        if (type === 'password' || name.indexOf('密码') >= 0 || name.indexOf('pass') >= 0 || name.indexOf('pwd') >= 0) return el;
+                                                    } else {
+                                                        if (type === 'password' || type === 'hidden' || type === 'submit' || type === 'button') continue;
+                                                        if (name.indexOf('username') >= 0 || name.indexOf('userid') >= 0 ||
+                                                            name.indexOf('user') >= 0 || name.indexOf('account') >= 0 ||
+                                                            name.indexOf('login') >= 0 || name.indexOf('学号') >= 0 ||
+                                                            name.indexOf('工号') >= 0 || name.indexOf('账号') >= 0) return el;
+                                                    }
+                                                }
+                                                return null;
+                                            }
+                                            function findUser(doc) {
+                                                return bySelector(doc, [
+                                                    '#username',
+                                                    '#userName',
+                                                    '#mobileUsername',
+                                                    'input[name="username"]',
+                                                    'input[name="userName"]',
+                                                    'input[name="userid"]',
+                                                    'input[name="account"]',
+                                                    'input[name="loginName"]',
+                                                    'input[autocomplete="username"]',
+                                                    'input[placeholder*="学号"]',
+                                                    'input[placeholder*="工号"]',
+                                                    'input[placeholder*="账号"]',
+                                                    'input[type="text"]',
+                                                    'input[type="tel"]'
+                                                ]) || byAttrs(doc, false);
+                                            }
+                                            function findPass(doc) {
+                                                return bySelector(doc, [
+                                                    '#password',
+                                                    '#passWord',
+                                                    'input[name="password"]',
+                                                    'input[name="passWord"]',
+                                                    'input[name="pwd"]',
+                                                    'input[autocomplete="current-password"]',
+                                                    'input[placeholder*="密码"]',
+                                                    'input[type="password"]'
+                                                ]) || byAttrs(doc, true);
+                                            }
+                                            function findButton(doc, pass) {
+                                                var btn = bySelector(doc, [
+                                                    '#login',
+                                                    '#login_submit',
+                                                    'button[type="submit"]',
+                                                    'input[type="submit"]',
+                                                    '.login_btn',
+                                                    '.login-btn',
+                                                    '.btn-login',
+                                                    '.submit'
+                                                ]);
+                                                if (btn) return btn;
+                                                var all = Array.prototype.slice.call(doc.querySelectorAll('button,input[type="button"],input[type="submit"],a,div,span'));
+                                                for (var i = 0; i < all.length; i++) {
+                                                    var text = (all[i].innerText || all[i].value || '').trim();
+                                                    if (visible(all[i]) && /^登录${'$'}/.test(text)) return all[i];
+                                                }
+                                                return null;
+                                            }
+                                            var allDocs = docs();
+                                            var doc = null, user = null, pass = null;
+                                            for (var i = 0; i < allDocs.length; i++) {
+                                                user = findUser(allDocs[i]);
+                                                pass = findPass(allDocs[i]);
+                                                if (user && pass) {
+                                                    doc = allDocs[i];
+                                                    break;
+                                                }
+                                            }
+                                            if (!user || !pass) {
+                                                return 'missing inputs=' + document.querySelectorAll('input').length +
+                                                    ' title=' + (document.title || '').slice(0, 30);
+                                            }
                                             user.focus();
                                             setNativeValue(user, ${org.json.JSONObject.quote(username)});
-                                            user.dispatchEvent(new Event('input', { bubbles: true }));
-                                            user.dispatchEvent(new Event('change', { bubbles: true }));
-                                            user.dispatchEvent(new Event('blur', { bubbles: true }));
+                                            fire(user);
                                             pass.focus();
                                             setNativeValue(pass, ${org.json.JSONObject.quote(password)});
-                                            pass.dispatchEvent(new Event('input', { bubbles: true }));
-                                            pass.dispatchEvent(new Event('change', { bubbles: true }));
-                                            pass.dispatchEvent(new Event('blur', { bubbles: true }));
-                                            var button = findInput([
-                                                'button[type=submit]',
-                                                'input[type=submit]',
-                                                '#login',
-                                                '.login_btn',
-                                                'button.login',
-                                                '.login-btn',
-                                                '.btn-login',
-                                                '.submit'
-                                            ]);
-                                            if (!button) {
-                                                var allButtons = Array.prototype.slice.call(document.querySelectorAll('button,input[type=button],span,div,a'));
-                                                button = allButtons.find(function(el) {
-                                                    return /登录/.test((el.innerText || el.value || '').trim());
-                                                }) || null;
-                                            }
+                                            fire(pass);
+                                            var button = findButton(doc || document, pass);
                                             if (button) {
-                                                setTimeout(function() { button.click(); }, 300);
-                                                return 'submitted';
+                                                setTimeout(function() {
+                                                    fire(user);
+                                                    fire(pass);
+                                                    button.click();
+                                                }, 700);
+                                                return 'submitted user=' + (user.id || user.name || user.placeholder || '?') +
+                                                    ' pass=' + (pass.id || pass.name || pass.placeholder || '?');
                                             }
                                             if (pass.form) {
-                                                setTimeout(function() { pass.form.submit(); }, 300);
+                                                setTimeout(function() {
+                                                    fire(user);
+                                                    fire(pass);
+                                                    pass.form.submit();
+                                                }, 700);
                                                 return 'form_submitted';
                                             }
                                             return 'filled';
                                         })();
                                     """.trimIndent()
-                                    evalWithLog(view, "统一认证自动填表", 350, script)
-                                    evalWithLog(view, "统一认证自动填表重试1", 1400, script)
-                                    evalWithLog(view, "统一认证自动填表重试2", 2800, script)
+                                    evalWithLog(view, "统一认证自动填表", 500, script)
+                                    evalWithLog(view, "统一认证自动填表重试1", 1800, script)
+                                    evalWithLog(view, "统一认证自动填表重试2", 3500, script)
+                                    evalWithLog(view, "统一认证自动填表重试3", 6000, script)
                                 }
 
                                 private fun isSuccessUrl(url: String): Boolean {
@@ -869,18 +955,14 @@ private fun CasLoginDialog(
                                     onDebug("统一认证页面完成加载: $currentUrl")
                                     if (!maybeFinish(currentUrl)) {
                                         tryPortalButtonClick(view, currentUrl)
-                                        tryAutoFill(view, currentUrl)
+                                        tryAutoFill(view)
                                     }
                                 }
                             }
                             loadUrl(loginUrl)
                         }
                     },
-                    update = { webView ->
-                        if (webView.url != loginUrl) {
-                            webView.loadUrl(loginUrl)
-                        }
-                    },
+                    update = {},
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(420.dp)
