@@ -66,3 +66,7 @@ Phase 5
 ## Notes
 - User's screenshots show Android HS_WIFI captive portal flow: connect Wi-Fi, tap WLAN login notification, choose unified identity authentication, then enter account/password on the Hanshan Normal University login form.
 - User reports current implementation works in South Zone 3 dormitory, but "capture auth parameters" fails in South Zone 3 or other-zone teaching areas and cafeterias.
+- 2026-06-04 screenshots show a multi-device switching case where the embedded WebView probe reaches `msftconnecttest.com/redirect?hstc_probe_ts=...` and fails with `net::ERR_CONNECTION_RESET`; Android reports the current WLAN cannot access the Internet. Treat this as a probe-entry failure and a possible stale/over-quota device session, not as proof that the account is permanently blocked.
+- 2026-06-04 follow-up: WebView probe now advances on main-frame connection reset/HTTP errors and tries direct campus portal fallbacks before exhausting capture.
+- 2026-06-04 direct CAS follow-up: unified identity login now first performs the CAS flow through OkHttp: create authorize URL, preserve CAS cookies, fetch public key, RSA-encrypt password, submit login form, follow `ticket` callback. WebView remains as fallback for captcha/MFA/page variants.
+- 2026-06-04 delivery follow-up: final phone build includes the Apple-like UI refresh plus bounded scrollable debug log/raw-response panels so long diagnostic output no longer stretches the page.

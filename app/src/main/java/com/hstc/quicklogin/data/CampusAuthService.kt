@@ -2,9 +2,18 @@ package com.hstc.quicklogin.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.FormBody
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.net.URLDecoder
+import java.security.KeyFactory
+import java.security.spec.X509EncodedKeySpec
+import javax.crypto.Cipher
 
 class CampusAuthService(
     private val client: OkHttpClient,
@@ -47,6 +56,124 @@ class CampusAuthService(
             debugLogStore.add("统一身份认证入口失败: $message")
             throw IllegalStateException(message)
         }
+    }
+
+    suspend fun loginWithCasDirect(
+        credentials: SavedCredentials,
+        context: PortalContext
+    ): LoginResult = withContext(Dispatchers.IO) {
+        val cookieJar = MemoryCookieJar()
+        val casClient = client.newBuilder()
+            .cookieJar(cookieJar)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+        val authorizeUrl = createCasAuthorizeUrl(context)
+        debugLogStore.add("尝试纯请求统一认证: ${redactSensitive(authorizeUrl)}")
+
+        val first = casClient.execute(Request.Builder().url(authorizeUrl).get().build())
+        followCasTicketRedirects(casClient, first, context)?.let { return@withContext it }
+
+        val loginHtml = first.bodyText
+        if (!loginHtml.contains("id=\"fm1\"", ignoreCase = true) &&
+            !loginHtml.contains("name=\"execution\"", ignoreCase = true)
+        ) {
+            return@withContext LoginResult(
+                success = false,
+                message = "统一认证没有返回可识别的登录表单",
+                rawResponse = loginHtml.take(1200)
+            )
+        }
+
+        val execution = loginHtml.htmlInputValue("execution")
+        if (execution.isBlank()) {
+            return@withContext LoginResult(
+                success = false,
+                message = "统一认证登录页缺少 execution，无法纯请求登录",
+                rawResponse = loginHtml.take(1200)
+            )
+        }
+
+        val publicKey = casClient.executeText(
+            Request.Builder()
+                .url(CAS_PUBLIC_KEY_URL)
+                .get()
+                .header("Referer", authorizeUrl)
+                .build()
+        )
+        val encryptedPassword = "__RSA__" + encryptPasswordForCas(credentials.password, publicKey)
+        val postBody = FormBody.Builder()
+            .add("username", credentials.username)
+            .add("password", encryptedPassword)
+            .add("captcha", "")
+            .add("currentMenu", "1")
+            .add("failN", "0")
+            .add("mfaState", "")
+            .add("execution", execution)
+            .add("_eventId", "submit")
+            .add("geolocation", "")
+            .add("submit", "登录")
+            .build()
+        val post = casClient.execute(
+            Request.Builder()
+                .url(authorizeUrl)
+                .post(postBody)
+                .header("Origin", CAS_ORIGIN)
+                .header("Referer", authorizeUrl)
+                .header("User-Agent", MOBILE_USER_AGENT)
+                .build()
+        )
+        followCasTicketRedirects(casClient, post, context)?.let { return@withContext it }
+
+        val raw = post.bodyText
+        val message = when {
+            raw.contains("captcha", ignoreCase = true) || raw.contains("验证码") ->
+                "统一认证需要验证码，已回退到网页登录"
+            raw.contains("mfa", ignoreCase = true) || raw.contains("安全验证") ->
+                "统一认证需要二次验证，已回退到网页登录"
+            raw.contains("密码", ignoreCase = true) || raw.contains("账号", ignoreCase = true) ->
+                "统一认证账号或密码未通过，已回退到网页登录"
+            else -> "纯请求统一认证未拿到 ticket，已回退到网页登录"
+        }
+        debugLogStore.add("纯请求统一认证失败: $message")
+        LoginResult(
+            success = false,
+            message = message,
+            rawResponse = raw.take(2000)
+        )
+    }
+
+    private suspend fun followCasTicketRedirects(
+        casClient: OkHttpClient,
+        first: CasResponse,
+        context: PortalContext
+    ): LoginResult? {
+        var current = first
+        repeat(8) {
+            val nextUrl = current.redirectTargetOrNull() ?: return null
+            if (nextUrl.contains("ticket=", ignoreCase = true) &&
+                nextUrl.contains("/eportal/portal/cas/login", ignoreCase = true)
+            ) {
+                debugLogStore.add("纯请求统一认证拿到 ticket，回调 eportal")
+            }
+            current = casClient.execute(
+                Request.Builder()
+                    .url(nextUrl)
+                    .get()
+                    .header("User-Agent", MOBILE_USER_AGENT)
+                    .build()
+            )
+            if (current.url.contains("/3.htm") || current.url.contains("login_success", ignoreCase = true)) {
+                val (online, account) = checkStatus(context)
+                return LoginResult(
+                    success = online,
+                    message = if (online) "统一认证登录成功" else "已完成统一认证回调，但状态暂未同步",
+                    code = if (online) "1" else "0",
+                    rawResponse = "account=$account url=${current.url}"
+                )
+            }
+        }
+        return null
     }
 
     suspend fun checkStatus(context: PortalContext): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -207,5 +334,85 @@ class CampusAuthService(
 
     companion object {
         private val DEVICE_ACTION_HINTS = listOf("绑定", "终端", "设备", "数量", "上限", "mac", "解绑")
+        private const val CAS_PUBLIC_KEY_URL = "https://hscas.hstc.edu.cn/cas/jwt/publicKey"
+        private const val CAS_ORIGIN = "https://hscas.hstc.edu.cn"
+        private const val MOBILE_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
     }
 }
+
+private data class CasResponse(
+    val code: Int,
+    val url: String,
+    val location: String,
+    val bodyText: String
+)
+
+private fun OkHttpClient.execute(request: Request): CasResponse {
+    newCall(request).execute().use { response ->
+        return CasResponse(
+            code = response.code,
+            url = response.request.url.toString(),
+            location = response.header("Location").orEmpty(),
+            bodyText = response.body?.string().orEmpty()
+        )
+    }
+}
+
+private fun OkHttpClient.executeText(request: Request): String {
+    newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            throw IllegalStateException("HTTP ${response.code} ${response.message}")
+        }
+        return response.body?.string().orEmpty()
+    }
+}
+
+private fun CasResponse.redirectTargetOrNull(): String? {
+    if (code !in 300..399 || location.isBlank()) return null
+    val base = url.toHttpUrlOrNullCompat() ?: return location
+    return base.resolve(location)?.toString() ?: location
+}
+
+private fun String.htmlInputValue(name: String): String {
+    val escaped = Regex.escape(name)
+    val inputRegex = Regex("""(?is)<input\b(?=[^>]*\bname=["']$escaped["'])[^>]*>""")
+    val input = inputRegex.find(this)?.value.orEmpty()
+    return Regex("""(?is)\bvalue=["']([^"']*)["']""")
+        .find(input)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrDefault(it) }
+        .orEmpty()
+}
+
+private fun encryptPasswordForCas(password: String, pem: String): String {
+    val base64Key = pem
+        .replace("-----BEGIN PUBLIC KEY-----", "")
+        .replace("-----END PUBLIC KEY-----", "")
+        .replace(Regex("\\s"), "")
+    val keyBytes = android.util.Base64.decode(base64Key, android.util.Base64.DEFAULT)
+    val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(keyBytes))
+    val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
+    cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+    return android.util.Base64.encodeToString(
+        cipher.doFinal(password.toByteArray(Charsets.UTF_8)),
+        android.util.Base64.NO_WRAP
+    )
+}
+
+private class MemoryCookieJar : CookieJar {
+    private val cookies = mutableListOf<Cookie>()
+
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        this.cookies.removeAll { old -> cookies.any { it.name == old.name && it.domain == old.domain } }
+        this.cookies.addAll(cookies)
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> {
+        return cookies.filter { it.matches(url) }
+    }
+}
+
+private fun String.toHttpUrlOrNullCompat(): HttpUrl? =
+    toHttpUrlOrNull()

@@ -295,12 +295,43 @@ class AuthRepository(
                 debugLines = debugLogStore.lines.value
             ) to null
         }
+        if (credentials.username.isBlank() || credentials.password.isBlank()) {
+            return AuthSnapshot(
+                context = context,
+                credentials = credentials,
+                statusMessage = "请先在设置页保存账号和密码",
+                lastLoginResult = LoginResult(false, "缺少账号或密码"),
+                debugLines = debugLogStore.lines.value
+            ) to null
+        }
+        val directResult = runCatching {
+            campusAuthService.loginWithCasDirect(credentials, context)
+        }.getOrElse { error ->
+            debugLogStore.add("纯请求统一认证异常: ${error.message.orEmpty()}")
+            LoginResult(
+                success = false,
+                message = "纯请求统一认证异常，已回退到网页登录",
+                rawResponse = error.stackTraceToString().take(2000)
+            )
+        }
+        if (directResult.success) {
+            val (latestOnline, latestAccount) = campusAuthService.checkStatus(context)
+            return AuthSnapshot(
+                context = context,
+                isOnline = latestOnline,
+                onlineAccount = latestAccount,
+                statusMessage = directResult.message,
+                credentials = credentials,
+                lastLoginResult = directResult,
+                debugLines = debugLogStore.lines.value
+            ) to null
+        }
         val authorizeUrl = campusAuthService.createCasAuthorizeUrl(context)
         return AuthSnapshot(
             context = context,
             credentials = credentials,
-            statusMessage = "统一身份认证页面已打开，请在页面内完成登录",
-            lastLoginResult = null,
+            statusMessage = directResult.message,
+            lastLoginResult = directResult,
             debugLines = debugLogStore.lines.value
         ) to authorizeUrl
     }

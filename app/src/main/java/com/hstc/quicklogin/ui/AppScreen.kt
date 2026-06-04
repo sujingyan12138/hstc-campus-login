@@ -1,30 +1,56 @@
 package com.hstc.quicklogin.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.CloudDone
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Router
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Smartphone
+import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.outlined.WifiFind
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -33,6 +59,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,11 +71,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.annotation.SuppressLint
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -74,6 +108,7 @@ fun HstcQuickLoginAppScreen(viewModel: AuthViewModel) {
         PortalProbeDialog(
             onCaptured = viewModel::capturePortalUrl,
             onCapturedContent = viewModel::capturePortalContent,
+            onDebug = viewModel::addDebugLine,
             username = uiState.credentials.username,
             password = uiState.credentials.password,
             onDismiss = viewModel::cancelPortalProbe
@@ -98,15 +133,42 @@ fun HstcQuickLoginAppScreen(viewModel: AuthViewModel) {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("HSTC 校园网一键重登") }) },
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "HSTC",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "校园网快速连接",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
-            NavigationBar(modifier = Modifier.navigationBarsPadding()) {
+            NavigationBar(
+                modifier = Modifier.navigationBarsPadding(),
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                tonalElevation = 0.dp
+            ) {
                 NavigationBarItem(
                     selected = currentTab == AppTab.Home,
                     onClick = { currentTab = AppTab.Home },
                     icon = { Icon(Icons.Outlined.Home, contentDescription = null) },
-                    label = { Text(AppTab.Home.title) }
+                    label = { Text(AppTab.Home.title) },
+                    colors = refinedNavColors()
                 )
                 NavigationBarItem(
                     selected = currentTab == AppTab.Devices,
@@ -115,19 +177,22 @@ fun HstcQuickLoginAppScreen(viewModel: AuthViewModel) {
                         viewModel.loadDevices()
                     },
                     icon = { Icon(Icons.AutoMirrored.Outlined.List, contentDescription = null) },
-                    label = { Text(AppTab.Devices.title) }
+                    label = { Text(AppTab.Devices.title) },
+                    colors = refinedNavColors()
                 )
                 NavigationBarItem(
                     selected = currentTab == AppTab.Settings,
                     onClick = { currentTab = AppTab.Settings },
                     icon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                    label = { Text(AppTab.Settings.title) }
+                    label = { Text(AppTab.Settings.title) },
+                    colors = refinedNavColors()
                 )
                 NavigationBarItem(
                     selected = currentTab == AppTab.Debug,
                     onClick = { currentTab = AppTab.Debug },
                     icon = { Icon(Icons.Outlined.BugReport, contentDescription = null) },
-                    label = { Text(AppTab.Debug.title) }
+                    label = { Text(AppTab.Debug.title) },
+                    colors = refinedNavColors()
                 )
             }
         }
@@ -135,18 +200,22 @@ fun HstcQuickLoginAppScreen(viewModel: AuthViewModel) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(pageBrush())
                 .padding(padding)
         ) {
             if (uiState.loading) {
-                Row(
+                GlassPanel(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    CircularProgressIndicator()
-                    Text("正在处理请求，请稍候")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text("正在处理请求", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
             when (currentTab) {
@@ -193,64 +262,62 @@ private fun HomeTab(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            StatusCard(
-                title = "网络状态",
-                lines = listOf(
-                    "状态: ${if (state.isOnline) "已在线" else "未在线"}",
-                    "账号: ${state.onlineAccount.ifBlank { "未知" }}",
-                    "消息: ${state.statusMessage}"
+            ConnectionHero(
+                online = state.isOnline,
+                account = state.onlineAccount.ifBlank { "未知账号" },
+                message = state.statusMessage.ifBlank { "等待操作" }
+            )
+        }
+        item {
+            EnvironmentPanel(
+                entries = listOf(
+                    Metric("IP", state.context?.ip.orEmpty().ifBlank { "未获取" }, Icons.Outlined.Wifi),
+                    Metric("MAC", state.context?.mac.orEmpty().ifBlank { "未获取" }, Icons.Outlined.Smartphone),
+                    Metric("AC IP", state.context?.wlanAcIp.orEmpty().ifBlank { "未获取" }, Icons.Outlined.Router),
+                    Metric("Program", state.context?.programIndex.orEmpty().ifBlank { "-" }, Icons.Outlined.Link)
                 )
             )
         }
         item {
-            StatusCard(
-                title = "当前环境",
-                lines = listOf(
-                    "IP: ${state.context?.ip.orEmpty().ifBlank { "未获取" }}",
-                    "MAC: ${state.context?.mac.orEmpty().ifBlank { "未获取" }}",
-                    "AC IP: ${state.context?.wlanAcIp.orEmpty().ifBlank { "未获取" }}",
-                    "AC 名称: ${state.context?.wlanAcName.orEmpty().ifBlank { "未获取" }}",
-                    "Program/Page: ${state.context?.programIndex.orEmpty()}/${state.context?.pageIndex.orEmpty()}"
+            ActionPanel {
+                PrimaryAction(
+                    text = "统一身份认证登录",
+                    icon = Icons.Outlined.Key,
+                    onClick = onStartCasLogin
                 )
-            )
-        }
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("快捷操作", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("采集环境并检测状态") }
-                    Button(onClick = onStartCasLogin, modifier = Modifier.fillMaxWidth()) {
-                        Text("统一身份认证登录")
-                    }
-                    OutlinedButton(onClick = onProbe, modifier = Modifier.fillMaxWidth()) {
-                        Text("抓取认证页参数（仅未登录时）")
-                    }
-                    OutlinedButton(onClick = onLogin, modifier = Modifier.fillMaxWidth()) {
-                        Text("非智慧韩园账号直登")
-                    }
-                    if (state.lastLoginResult?.requiresDeviceAction == true) {
-                        OutlinedButton(onClick = onShowDevices, modifier = Modifier.fillMaxWidth()) {
-                            Text("登录失败，查看绑定设备")
-                        }
-                    }
+                SoftAction(
+                    text = "采集环境并检测状态",
+                    icon = Icons.Outlined.Refresh,
+                    onClick = onRefresh
+                )
+                SoftAction(
+                    text = "抓取认证页参数",
+                    icon = Icons.Outlined.WifiFind,
+                    onClick = onProbe
+                )
+                SoftAction(
+                    text = "非智慧韩园账号直登",
+                    icon = Icons.Outlined.Link,
+                    onClick = onLogin
+                )
+                if (state.lastLoginResult?.requiresDeviceAction == true) {
+                    SoftAction(
+                        text = "查看绑定设备",
+                        icon = Icons.AutoMirrored.Outlined.List,
+                        onClick = onShowDevices
+                    )
                 }
             }
         }
         item {
-            StatusCard(
-                title = "最后一次登录结果",
-                lines = listOf(
-                    "成功: ${state.lastLoginResult?.success ?: false}",
-                    "代码: ${state.lastLoginResult?.code.orEmpty().ifBlank { "-" }}",
-                    "消息: ${state.lastLoginResult?.message.orEmpty().ifBlank { "暂无" }}"
-                )
+            ResultPanel(
+                success = state.lastLoginResult?.success,
+                code = state.lastLoginResult?.code.orEmpty().ifBlank { "-" },
+                message = state.lastLoginResult?.message.orEmpty().ifBlank { "暂无登录结果" }
             )
         }
     }
@@ -268,69 +335,55 @@ private fun DeviceTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Button(onClick = onRefresh) { Text("刷新设备") }
-        Text(
-            text = if (devices.isEmpty() && !state.isOnline) {
-                "当前没有加载到可展示的绑定设备。"
+        SectionHeader(
+            title = "设备",
+            subtitle = if (devices.isEmpty() && !state.isOnline) {
+                "暂无可展示的绑定设备"
             } else {
-                "已展示 ${devices.size + if (state.isOnline) 1 else 0} 台设备${if (state.isOnline) "（含当前设备）" else ""}"
+                "已展示 ${devices.size + if (state.isOnline) 1 else 0} 台设备"
             },
-            style = MaterialTheme.typography.bodyMedium
+            actionText = "刷新",
+            action = onRefresh
         )
         if (state.isOnline) {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            GlassPanel(modifier = Modifier.fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("当前在线设备", fontWeight = FontWeight.SemiBold)
-                    Text("当前 IP: ${state.context?.ip.orEmpty().ifBlank { "未获取" }}")
-                    Text("当前 MAC: ${state.context?.mac.orEmpty().ifBlank { "未获取" }}")
-                    OutlinedButton(onClick = onLogoutCurrent) {
-                        Text("注销当前在线设备")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(online = true)
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("当前在线设备", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                state.context?.ip.orEmpty().ifBlank { "未获取 IP" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                    Text(
+                        "MAC ${state.context?.mac.orEmpty().ifBlank { "未获取" }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    SoftAction("注销当前在线设备", Icons.Outlined.Logout, onLogoutCurrent)
                 }
             }
         }
         if (devices.isEmpty()) {
-            Text("暂无已绑定设备，或者当前账号还没有加载出设备列表。")
+            EmptyState("暂无已绑定设备")
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(devices) { device ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(device.mac, fontWeight = FontWeight.SemiBold)
-                            if (device.name.isNotBlank()) {
-                                Text("设备名: ${device.name}")
-                            }
-                            Text(
-                                if (device.onlineIp.isNotBlank()) {
-                                    "在线 IP: ${device.onlineIp}"
-                                } else {
-                                    "在线 IP: 未知/当前未在线"
-                                }
-                            )
-                            Text(
-                                when {
-                                    device.isCurrentDevice -> "当前设备"
-                                    device.status.isNotBlank() -> "状态: ${device.status}"
-                                    else -> "其他已绑定设备"
-                                }
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    if (device.isCurrentDevice) onLogoutCurrent() else onUnbind(device)
-                                }
-                            ) {
-                                Text(if (device.isCurrentDevice) "注销当前设备" else "解绑并重试")
-                            }
+                    DeviceRow(
+                        device = device,
+                        onClick = {
+                            if (device.isCurrentDevice) onLogoutCurrent() else onUnbind(device)
                         }
-                    }
+                    )
                 }
             }
         }
@@ -355,52 +408,58 @@ private fun SettingsTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("账号设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("当前状态", fontWeight = FontWeight.SemiBold)
-                Text(state.statusMessage.ifBlank { "等待操作" })
-            }
+        SectionHeader("设置", "账号和本地偏好")
+        GlassPanel(modifier = Modifier.fillMaxWidth()) {
+            Text("当前状态", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(state.statusMessage.ifBlank { "等待操作" }, fontWeight = FontWeight.SemiBold)
         }
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("账号") },
-            singleLine = true
+            singleLine = true,
+            shape = RoundedShape,
+            colors = textFieldColors()
         )
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("密码") },
-            singleLine = true
+            singleLine = true,
+            shape = RoundedShape,
+            visualTransformation = PasswordVisualTransformation(),
+            colors = textFieldColors()
         )
-        SwitchRow("解绑后自动重试", autoRetry) { autoRetry = it }
-        SwitchRow("启用详细日志", loggingEnabled) { loggingEnabled = it }
-        Button(
+        GlassPanel(modifier = Modifier.fillMaxWidth()) {
+            SwitchRow("解绑后自动重试", autoRetry) { autoRetry = it }
+            SwitchRow("启用详细日志", loggingEnabled) { loggingEnabled = it }
+        }
+        PrimaryAction(
+            text = if (state.loading) "正在保存..." else "保存到本地加密存储",
+            icon = Icons.Outlined.Key,
             onClick = { onSave(username, password, autoRetry, loggingEnabled) },
-            modifier = Modifier.fillMaxWidth(),
             enabled = !state.loading
-        ) {
-            Text(if (state.loading) "正在保存..." else "保存到本地加密存储")
-        }
-        OutlinedButton(
+        )
+        SoftAction(
+            text = "清除保存的账号密码",
+            icon = Icons.Outlined.Logout,
             onClick = onClear,
-            modifier = Modifier.fillMaxWidth(),
             enabled = !state.loading
-        ) {
-            Text("清除保存的账号密码")
-        }
-        Text("密码会存进 Android Keystore + EncryptedSharedPreferences，调试页默认会脱敏。")
+        )
+        Text(
+            "密码会存进 Android Keystore + EncryptedSharedPreferences，调试页默认会脱敏。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
 @Composable
 private fun DebugTab(lines: List<String>, rawResponse: String) {
+    val visibleLines = lines.takeLast(120)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -408,40 +467,399 @@ private fun DebugTab(lines: List<String>, rawResponse: String) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("调试日志", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (lines.isEmpty()) {
-                    Text("暂无日志")
-                } else {
-                    lines.takeLast(120).forEach { line ->
-                        Text(line, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
+        SectionHeader("调试", "最近 ${visibleLines.size} 条日志")
+        GlassPanel(modifier = Modifier.fillMaxWidth()) {
+            ScrollableLogPanel(visibleLines)
         }
-        Text("最后一次响应", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Text(
+        SectionHeader("最后一次响应", "原始返回内容")
+        GlassPanel(modifier = Modifier.fillMaxWidth()) {
+            ScrollableTextPanel(
                 text = rawResponse.ifBlank { "暂无原始响应" },
-                modifier = Modifier.padding(16.dp),
-                style = MaterialTheme.typography.bodySmall
+                height = 220.dp
             )
         }
     }
 }
 
 @Composable
-private fun StatusCard(title: String, lines: List<String>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            lines.forEach { Text(it) }
+private fun ScrollableLogPanel(lines: List<String>) {
+    val scrollState = rememberScrollState()
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(420.dp)
+    ) {
+        if (lines.isEmpty()) {
+            EmptyState("暂无日志")
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(end = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                lines.forEach { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+            ScrollThumb(
+                scrollState = scrollState,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+            )
         }
     }
+}
+
+@Composable
+private fun ScrollableTextPanel(text: String, height: Dp) {
+    val scrollState = rememberScrollState()
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(end = 14.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace
+        )
+        ScrollThumb(
+            scrollState = scrollState,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+        )
+    }
+}
+
+@Composable
+private fun ScrollThumb(scrollState: ScrollState, modifier: Modifier = Modifier) {
+    if (scrollState.maxValue <= 0) return
+
+    BoxWithConstraints(
+        modifier = modifier.width(4.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        val thumbHeight = if (maxHeight < 72.dp) maxHeight else 72.dp
+        val travel = maxHeight - thumbHeight
+        val progress = scrollState.value.toFloat() / scrollState.maxValue.toFloat()
+        val thumbOffset = travel * progress
+
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(3.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f))
+        )
+        Box(
+            modifier = Modifier
+                .offset(y = thumbOffset)
+                .height(thumbHeight)
+                .width(3.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.58f))
+        )
+    }
+}
+
+@Composable
+private fun ConnectionHero(online: Boolean, account: String, message: String) {
+    val accent = if (online) Color(0xFF2EAD6B) else Color(0xFFFF9F0A)
+    GlassPanel(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        accent.copy(alpha = 0.13f),
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
+                    )
+                ),
+                RoundedShape
+            )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (online) Icons.Outlined.CloudDone else Icons.Outlined.CloudOff,
+                    contentDescription = null,
+                    tint = accent,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    if (online) "已在线" else "未在线",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(account, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun EnvironmentPanel(entries: List<Metric>) {
+    GlassPanel(modifier = Modifier.fillMaxWidth()) {
+        SectionTitle("当前环境")
+        entries.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { metric ->
+                    MetricTile(metric, modifier = Modifier.weight(1f))
+                }
+                if (row.size == 1) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionPanel(content: @Composable ColumnScope.() -> Unit) {
+    GlassPanel(modifier = Modifier.fillMaxWidth()) {
+        SectionTitle("快捷操作")
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+    }
+}
+
+@Composable
+private fun ResultPanel(success: Boolean?, code: String, message: String) {
+    GlassPanel(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StatusDot(online = success == true)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("最后一次登录结果", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "代码 $code",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun DeviceRow(device: BoundDevice, onClick: () -> Unit) {
+    GlassPanel(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Outlined.Smartphone, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(device.mac, fontWeight = FontWeight.SemiBold)
+                Text(
+                    device.onlineIp.takeIf { it.isNotBlank() } ?: "当前未在线",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    when {
+                        device.isCurrentDevice -> "当前设备"
+                        device.status.isNotBlank() -> device.status
+                        else -> "其他已绑定设备"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        SoftAction(if (device.isCurrentDevice) "注销当前设备" else "解绑并重试", Icons.Outlined.Logout, onClick)
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    subtitle: String,
+    actionText: String? = null,
+    action: (() -> Unit)? = null
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (actionText != null && action != null) {
+            OutlinedButton(
+                onClick = action,
+                shape = CircleShape,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Text(actionText)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(10.dp))
+}
+
+@Composable
+private fun MetricTile(metric: Metric, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedShape)
+            .padding(12.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(metric.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Text(metric.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(metric.value, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun PrimaryAction(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp),
+        shape = CircleShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        ),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun SoftAction(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    enabled: Boolean = true
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp),
+        shape = CircleShape,
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
+            contentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        border = ButtonDefaults.outlinedButtonBorder.copy(
+            brush = Brush.linearGradient(
+                listOf(
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.60f),
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                )
+            )
+        )
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text)
+    }
+}
+
+@Composable
+private fun GlassPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = modifier
+            .clip(RoundedShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f), RoundedShape),
+        shape = RoundedShape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun StatusDot(online: Boolean) {
+    val color = if (online) Color(0xFF2EAD6B) else Color(0xFFFF9F0A)
+    Box(
+        modifier = Modifier
+            .size(12.dp)
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
+@Composable
+private fun EmptyState(text: String) {
+    Text(
+        text,
+        modifier = Modifier.padding(8.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium
+    )
 }
 
 @Composable
@@ -456,11 +874,46 @@ private fun SwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean
     }
 }
 
+@Composable
+private fun pageBrush(): Brush = Brush.verticalGradient(
+    listOf(
+        MaterialTheme.colorScheme.background,
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        MaterialTheme.colorScheme.background
+    )
+)
+
+@Composable
+private fun refinedNavColors() = NavigationBarItemDefaults.colors(
+    selectedIconColor = MaterialTheme.colorScheme.primary,
+    selectedTextColor = MaterialTheme.colorScheme.primary,
+    indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+)
+
+@Composable
+private fun textFieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.70f),
+    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+    focusedContainerColor = MaterialTheme.colorScheme.surface,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+)
+
+private data class Metric(
+    val label: String,
+    val value: String,
+    val icon: ImageVector
+)
+
+private val RoundedShape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun PortalProbeDialog(
     onCaptured: (String) -> Unit,
     onCapturedContent: (String, String) -> Unit,
+    onDebug: (String) -> Unit,
     username: String,
     password: String,
     onDismiss: () -> Unit
@@ -480,13 +933,17 @@ private fun PortalProbeDialog(
                 AndroidView(
                     factory = { context ->
                         val probeUrls = listOf(
-                            "http://www.gstatic.com/generate_204",
-                            "http://connectivitycheck.gstatic.com/generate_204",
-                            "http://www.msftconnecttest.com/redirect",
-                            "http://connect.rom.miui.com/generate_204",
-                            "http://captive.apple.com/hotspot-detect.html",
-                            "http://neverssl.com/",
-                            "http://1.1.1.1/"
+                            "http://www.gstatic.com/generate_204" to true,
+                            "http://connectivitycheck.gstatic.com/generate_204" to true,
+                            "http://rz.hstc.edu.cn/" to false,
+                            "https://rz.hstc.edu.cn/" to false,
+                            "http://rz.hstc.edu.cn/eportal/" to false,
+                            "http://192.168.2.34/" to false,
+                            "http://www.msftconnecttest.com/redirect" to true,
+                            "http://connect.rom.miui.com/generate_204" to true,
+                            "http://captive.apple.com/hotspot-detect.html" to true,
+                            "http://neverssl.com/" to true,
+                            "http://1.1.1.1/" to true
                         )
                         var captured = false
                         var nextProbeIndex = 0
@@ -561,9 +1018,15 @@ private fun PortalProbeDialog(
 
                         fun WebView.loadNextProbe() {
                             if (captured || nextProbeIndex >= probeUrls.size) return
-                            val baseUrl = probeUrls[nextProbeIndex++]
-                            val separator = if (baseUrl.contains("?")) "&" else "?"
-                            loadUrl("$baseUrl${separator}hstc_probe_ts=${System.currentTimeMillis()}")
+                            val (baseUrl, addTimestamp) = probeUrls[nextProbeIndex++]
+                            val target = if (addTimestamp) {
+                                val separator = if (baseUrl.contains("?")) "&" else "?"
+                                "$baseUrl${separator}hstc_probe_ts=${System.currentTimeMillis()}"
+                            } else {
+                                baseUrl
+                            }
+                            onDebug("认证页探测 ${nextProbeIndex}/${probeUrls.size}: $target")
+                            loadUrl(target)
                         }
 
                         WebView(context).apply {
@@ -647,6 +1110,40 @@ private fun PortalProbeDialog(
 
                                 override fun onLoadResource(view: WebView?, url: String?) {
                                     captureOnce(url.orEmpty())
+                                }
+
+                                override fun onReceivedError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    error: android.webkit.WebResourceError?
+                                ) {
+                                    if (request?.isForMainFrame == false || captured) return
+                                    val code = error?.errorCode ?: 0
+                                    val description = error?.description?.toString().orEmpty()
+                                    val failingUrl = request?.url?.toString().orEmpty()
+                                    onDebug("认证页探测失败 code=$code msg=$description url=$failingUrl")
+                                    view?.postDelayed({
+                                        if (!captured) {
+                                            view.loadNextProbe()
+                                        }
+                                    }, 350)
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    errorResponse: WebResourceResponse?
+                                ) {
+                                    if (request?.isForMainFrame == false || captured) return
+                                    val status = errorResponse?.statusCode ?: 0
+                                    if (status < 400) return
+                                    val failingUrl = request?.url?.toString().orEmpty()
+                                    onDebug("认证页 HTTP 探测失败 status=$status url=$failingUrl")
+                                    view?.postDelayed({
+                                        if (!captured) {
+                                            view.loadNextProbe()
+                                        }
+                                    }, 350)
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {

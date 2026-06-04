@@ -42,6 +42,48 @@
 | Install after app-flow pcap fix | `adb install -r -d app-debug.apk` | Updated app is installed on connected phone | Success | Pass |
 | WebView HTML capture fallback | Extend portal capture to parse loaded page HTML/JavaScript content, not only URL changes | Areas that hide parameters in page content can still be parsed | Implemented, built, and installed | Pass |
 | Manual-flow fallback in probe dialog | Let parameter capture follow the same visible flow as the user: portal page, unified identity, CAS form, callback | Capture can succeed even when the first portal page URL does not expose parameters | Implemented, built, and installed | Pass |
+| 2026-06-04 build after reset fallback | `$env:SystemRoot='C:\WINDOWS'; $env:WINDIR='C:\WINDOWS'; cmd /c gradlew.bat testDebugUnitTest assembleDebug` | Unit tests and debug APK build pass | BUILD SUCCESSFUL | Pass |
+| 2026-06-04 install check | `adb devices` | Find a connected phone for install | No devices attached | Blocked |
+| 2026-06-04 direct CAS build | `$env:SystemRoot='C:\WINDOWS'; $env:WINDIR='C:\WINDOWS'; cmd /c gradlew.bat testDebugUnitTest assembleDebug` | Unit tests and debug APK build pass after direct CAS implementation | BUILD SUCCESSFUL | Pass |
+| 2026-06-04 install direct CAS APK | `adb install -r -d app\build\outputs\apk\debug\app-debug.apk` | Updated APK installs on phone | Success | Pass |
+| 2026-06-04 phone direct CAS login | ADB tap current-device logout, then tap `统一身份认证登录` | App logs in without requiring WebView | Home page showed `状态: 已在线` and `消息: 统一认证登录成功` | Pass |
+| 2026-06-04 UI build | `$env:SystemRoot='C:\WINDOWS'; $env:WINDIR='C:\WINDOWS'; cmd /c gradlew.bat assembleDebug` | Debug APK builds after UI redesign | BUILD SUCCESSFUL | Pass |
+| 2026-06-04 UI unit tests | `$env:SystemRoot='C:\WINDOWS'; $env:WINDIR='C:\WINDOWS'; cmd /c gradlew.bat testDebugUnitTest` | Existing unit tests pass | BUILD SUCCESSFUL | Pass |
+| 2026-06-04 UI install and screenshot | `adb install -r -d app\build\outputs\apk\debug\app-debug.apk`; `adb exec-out screencap -p > ui_home.png` | Updated UI installs and renders on phone | Install Success; screenshot inspected | Pass |
+| 2026-06-04 debug log scroll build/install | `$env:SystemRoot='C:\WINDOWS'; $env:WINDIR='C:\WINDOWS'; cmd /c gradlew.bat assembleDebug`; `adb install -r -d app\build\outputs\apk\debug\app-debug.apk`; `adb shell am start -n com.hstc.quicklogin/.MainActivity` | Debug page compiles after adding bounded scrollable log/raw-response panels and app installs on phone | BUILD SUCCESSFUL; install Success; app launched | Pass |
+| 2026-06-04 pre-push unit tests | `$env:SystemRoot='C:\WINDOWS'; $env:WINDIR='C:\WINDOWS'; cmd /c gradlew.bat testDebugUnitTest` | Existing unit tests still pass before committing and pushing | BUILD SUCCESSFUL | Pass |
+
+## Session: 2026-06-04
+
+### Multi-device switching failure analysis
+- **Status:** complete
+- Actions taken:
+  - Re-read `task_plan.md`, `progress.md`, `findings.md`, README, and the planning-with-files skill instructions.
+  - Inspected `CampusAuthService`, `NetworkEnvCollector`, `DeviceManageService`, `AuthRepository`, `AuthViewModel`, `AppScreen`, parser tests, and portal parser code.
+  - Analyzed new screenshots showing `ERR_CONNECTION_RESET` on `msftconnecttest.com/redirect?hstc_probe_ts=...` and Android's `当前 WLAN 无法访问互联网` notification.
+  - Added WebView main-frame error handling in the portal probe dialog so `ERR_CONNECTION_RESET` and HTTP errors immediately advance to the next probe destination.
+  - Added direct portal fallback probes for `rz.hstc.edu.cn` and the previously captured IP-hosted portal `192.168.2.34`.
+  - Ran unit tests and rebuilt the debug APK successfully.
+  - Checked ADB device list; no connected device was available for install or field verification.
+  - Reworked unified identity login to attempt a pure OkHttp CAS flow before opening WebView.
+  - Implemented CAS public-key fetch, RSA/PKCS1 password encryption, login form POST, cookie retention, and manual redirect following through the `ticket` eportal callback.
+  - Installed the APK on connected phone `6c6f7e08`.
+  - Field-tested by logging out the current phone and then tapping `统一身份认证登录`; the app logged back in directly and showed `统一认证登录成功`.
+  - Used the `frontend-design` skill for a refined, Apple-like visual direction.
+  - Updated the app theme to a neutral iOS-style palette with system blue accents, light gray background, and cleaner surface colors.
+  - Reworked the home page into a large connection status hero, compact environment metric tiles, and rounded action controls.
+  - Reworked device, settings, and debug screens with glass-like panels, pill buttons, quieter text hierarchy, and denser but cleaner information grouping.
+  - Built the debug APK, installed it on the connected phone, launched the app, and inspected a screenshot for layout issues.
+  - Added bounded scrollable panels with visible slim scroll indicators for long debug logs and raw responses.
+  - Rebuilt, installed, and launched the updated debug APK on the connected phone.
+- Files modified:
+  - `app/src/main/java/com/hstc/quicklogin/data/CampusAuthService.kt`
+  - `app/src/main/java/com/hstc/quicklogin/data/AuthRepository.kt`
+  - `app/src/main/java/com/hstc/quicklogin/ui/AppScreen.kt`
+  - `app/src/main/java/com/hstc/quicklogin/ui/theme/Theme.kt`
+  - `findings.md`
+  - `progress.md`
+  - `task_plan.md`
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
